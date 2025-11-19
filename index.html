@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Gemini Space Shooter Mobile</title>
+    <style>
+        body {
+            margin: 0;
+            background: #000;
+            overflow: hidden; /* vital for mobile games */
+            touch-action: none; /* prevents zooming/scrolling while playing */
+            font-family: 'Courier New', Courier, monospace;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 24px;
+            pointer-events: none; /* Let clicks pass through to the game */
+            z-index: 10;
+        }
+        #gameOverScreen {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.85);
+            color: white;
+            z-index: 20;
+        }
+        h1 { font-size: 40px; margin-bottom: 10px; color: #ff3366; }
+        p { font-size: 24px; margin-bottom: 30px; }
+        button {
+            padding: 15px 30px;
+            background: #00ffcc;
+            border: none;
+            border-radius: 8px;
+            font-size: 20px;
+            font-weight: bold;
+            color: #000;
+        }
+        button:active { background: #fff; }
+        
+        /* Mobile helper text */
+        #startMsg {
+            position: absolute;
+            bottom: 10%;
+            width: 100%;
+            text-align: center;
+            color: #00ffcc;
+            font-size: 18px;
+            animation: blink 1.5s infinite;
+            pointer-events: none;
+        }
+        @keyframes blink { 50% { opacity: 0.3; } }
+    </style>
+</head>
+<body>
+
+    <div id="ui">Score: <span id="scoreVal">0</span></div>
+    <div id="startMsg">TOUCH & DRAG TO PLAY</div>
+    
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="gameOverScreen">
+        <h1>GAME OVER</h1>
+        <p>Score: <span id="finalScore">0</span></p>
+        <button ontouchstart="location.reload()" onclick="location.reload()">RETRY</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreEl = document.getElementById('scoreVal');
+        const finalScoreEl = document.getElementById('finalScore');
+        const gameOverScreen = document.getElementById('gameOverScreen');
+        const startMsg = document.getElementById('startMsg');
+
+        // --- Resize Logic ---
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            // Reposition player if they go off screen after resize
+            if(player.x > canvas.width) player.x = canvas.width - player.w;
+            if(player.y > canvas.height) player.y = canvas.height - player.h;
+        }
+        window.addEventListener('resize', resize);
+        resize(); // Call once to set initial size
+
+        // --- Game Variables ---
+        let score = 0;
+        let gameOver = false;
+        let frames = 0;
+        let isTouching = false; // Tracks if player is holding screen
+
+        // Player Ship
+        const player = {
+            x: canvas.width / 2 - 20,
+            y: canvas.height - 100,
+            w: 40, // Slightly bigger for mobile visibility
+            h: 40,
+            color: '#00ffcc'
+        };
+
+        const bullets = [];
+        const enemies = [];
+
+        // --- Touch Controls ---
+        // specific to mobile: prevent default scrolling
+        document.addEventListener('touchstart', (e) => {
+            if(gameOver) return;
+            isTouching = true;
+            startMsg.style.display = 'none'; // Hide help text
+            updatePlayerPos(e.touches[0].clientX, e.touches[0].clientY);
+        }, {passive: false});
+
+        document.addEventListener('touchmove', (e) => {
+            if(gameOver) return;
+            e.preventDefault(); // Stop screen from scrolling
+            updatePlayerPos(e.touches[0].clientX, e.touches[0].clientY);
+        }, {passive: false});
+
+        document.addEventListener('touchend', () => {
+            isTouching = false;
+        });
+
+        // Also keep mouse for desktop testing
+        document.addEventListener('mousedown', () => isTouching = true);
+        document.addEventListener('mouseup', () => isTouching = false);
+        document.addEventListener('mousemove', (e) => {
+            if(isTouching) updatePlayerPos(e.clientX, e.clientY);
+        });
+
+        function updatePlayerPos(x, y) {
+            // Center the ship on the finger
+            player.x = x - player.w / 2;
+            // Optional: Allow moving Y axis too? Let's keep it simple (X only) or free movement?
+            // Let's do free movement for mobile, it feels better.
+            player.y = y - player.h - 20; // slightly above finger so you can see it
+
+            // Boundaries
+            if (player.x < 0) player.x = 0;
+            if (player.x + player.w > canvas.width) player.x = canvas.width - player.w;
+            if (player.y < 0) player.y = 0;
+            if (player.y + player.h > canvas.height) player.y = canvas.height - player.h;
+        }
+
+        // --- Mechanics ---
+        function spawnBullet() {
+            bullets.push({
+                x: player.x + player.w / 2 - 4,
+                y: player.y,
+                w: 8,
+                h: 20,
+                color: '#ff3366',
+                speed: 10
+            });
+        }
+
+        function spawnEnemy() {
+            const size = 40;
+            const x = Math.random() * (canvas.width - size);
+            enemies.push({
+                x: x,
+                y: -size,
+                w: size,
+                h: size,
+                color: '#ffaa00',
+                speed: 3 + Math.random() * 3
+            });
+        }
+
+        function checkCollisions() {
+            enemies.forEach((enemy, eIndex) => {
+                // Player Hit
+                if (
+                    player.x < enemy.x + enemy.w &&
+                    player.x + player.w > enemy.x &&
+                    player.y < enemy.y + enemy.h &&
+                    player.h + player.y > enemy.y
+                ) {
+                    endGame();
+                }
+                // Bullet Hit
+                bullets.forEach((bullet, bIndex) => {
+                    if (
+                        bullet.x < enemy.x + enemy.w &&
+                        bullet.x + bullet.w > enemy.x &&
+                        bullet.y < enemy.y + enemy.h &&
+                        bullet.h + bullet.y > enemy.y
+                    ) {
+                        enemies.splice(eIndex, 1);
+                        bullets.splice(bIndex, 1);
+                        score += 10;
+                        scoreEl.innerText = score;
+                    }
+                });
+            });
+        }
+
+        function endGame() {
+            gameOver = true;
+            finalScoreEl.innerText = score;
+            gameOverScreen.style.display = 'flex';
+        }
+
+        function update() {
+            if (gameOver) return;
+
+            // Auto-fire every 10 frames if touching
+            if (isTouching && frames % 10 === 0) {
+                spawnBullet();
+            }
+
+            // Move Bullets
+            bullets.forEach((bullet, index) => {
+                bullet.y -= bullet.speed;
+                if (bullet.y + bullet.h < 0) bullets.splice(index, 1);
+            });
+
+            // Move Enemies
+            enemies.forEach((enemy, index) => {
+                enemy.y += enemy.speed;
+                if (enemy.y > canvas.height) enemies.splice(index, 1);
+            });
+
+            if (frames % 40 === 0) spawnEnemy(); // Spawn faster on mobile
+            
+            checkCollisions();
+            frames++;
+        }
+
+        function draw() {
+            // Fill background
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw Player
+            ctx.fillStyle = player.color;
+            ctx.fillRect(player.x, player.y, player.w, player.h);
+
+            // Draw Bullets
+            bullets.forEach(b => {
+                ctx.fillStyle = b.color;
+                ctx.fillRect(b.x, b.y, b.w, b.h);
+            });
+
+            // Draw Enemies
+            enemies.forEach(e => {
+                ctx.fillStyle = e.color;
+                ctx.fillRect(e.x, e.y, e.w, e.h);
+            });
+        }
+
+        function loop() {
+            update();
+            draw();
+            if (!gameOver) requestAnimationFrame(loop);
+        }
+
+        loop();
+    </script>
+</body>
+</html>
